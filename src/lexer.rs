@@ -25,8 +25,8 @@ impl<'a> Lexer<'a> {
 
     // Chop while the given predicate is true
     fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char]
-        where
-            P: FnMut(&char) -> bool,
+    where
+        P: FnMut(&char) -> bool,
     {
         if let Some(n) = self.content.iter().position(|x| !predicate(x)) {
             self.chop(n)
