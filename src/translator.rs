@@ -1,7 +1,3 @@
-use crate::translator::MemorySegment::{
-    Argument, Constant, Local, Pointer, Static, Temp, That, This,
-};
-
 #[derive(Debug)]
 pub enum Arithmetic {
     ADD,
@@ -29,12 +25,13 @@ pub enum MemorySegment {
 
 impl MemorySegment {
     fn label(&self) -> String {
+        use MemorySegment::*;
         match self {
             Local => "@LCL",
             Argument => "@ARG",
             This => "@THIS",
             That => "@THAT",
-            _ => panic!("label not available for {:?}", self),
+            _ => "#INVALID_LABEL#",
         }
         .to_string()
     }
@@ -47,9 +44,13 @@ pub enum Command {
     Pop(MemorySegment, u16),
     Label(String),
     Goto(String),
-    If(String),
+    IfGoto(String),
     Function(String, u16),
-    Call(String, u16),
+    Call {
+        callee: String,
+        arg_count: u16,
+        return_address: String,
+    },
     Return,
 }
 
@@ -57,24 +58,29 @@ impl Command {
     pub fn translate(self, filename: &str, index: &mut u64) -> Vec<String> {
         use Command::*;
         match self {
-            Arithmetic(command) => Self::translate_arithmetic(index, command),
-            Push(mem, idx) => Self::translate_push(filename, mem, idx),
-            Pop(mem, idx) => Self::translate_pop(filename, mem, idx),
+            Arithmetic(operation) => Self::translate_arithmetic(index, filename, operation),
+            Push(segment, index) => Self::translate_push(filename, segment, index),
+            Pop(segment, index) => Self::translate_pop(filename, segment, index),
             Label(label) => Self::translate_label(label),
             Goto(label) => Self::translate_goto(label),
-            If(label) => Self::translate_if(label),
-            Function(name, arg) => Self::translate_function(name, arg),
-            Call(name, arg) => Self::translate_call(name, arg),
+            IfGoto(label) => Self::translate_if(label),
+            Function(name, local_var) => Self::translate_function(name, local_var),
+            Call {
+                callee: name,
+                arg_count,
+                return_address,
+            } => Self::translate_call(name, arg_count, return_address),
             Return => Self::translate_return(),
         }
     }
 
-    fn translate_arithmetic(index: &mut u64, command: Arithmetic) -> Vec<String> {
+    fn translate_arithmetic(index: &mut u64, filename: &str, operation: Arithmetic) -> Vec<String> {
         use Arithmetic::*;
         *index += 1;
-        let label = format!("(Arith_True${index})");
-        let l = format!("@Arith_True${index}");
-        let d = match command {
+        let label = format!("({filename}$Arith_True.{index})");
+        let l = format!("@{filename}$Arith_True.{index}");
+        // Factor out the main computation of the repeating stuff
+        let d = match operation {
             ADD => "M=M+D",
             SUB => "M=M-D",
             NEG => "M=-M",
@@ -86,7 +92,7 @@ impl Command {
             NOT => "M=!M",
         };
 
-        match command {
+        let instructions = match operation {
             ADD | SUB => vec!["@SP", "AM=M-1", "D=M", "A=A-1", d],
             AND | OR => vec!["@SP", "AM=M-1", "D=M", "A=A-1", d],
             NEG | NOT => vec!["@SP", "A=M-1", d],
@@ -94,11 +100,10 @@ impl Command {
                 "@SP", "AM=M-1", "D=M", "A=A-1", "D=M-D", "M=-1", &l, d, "@SP", "A=M-1", "M=0",
                 &label,
             ],
-        }
-        .into_iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<_>>()
+        };
+        instructions.into_iter().map(|x| x.to_string()).collect()
     }
+
     fn translate_push(filename: &str, segment: MemorySegment, index: u16) -> Vec<String> {
         use MemorySegment::*;
         let i = format!("@{index}");
@@ -129,6 +134,7 @@ impl Command {
         instructions.extend(&["@SP", "A=M", "M=D", "@SP", "M=M+1"]);
         instructions.into_iter().map(|x| x.to_string()).collect()
     }
+
     fn translate_pop(filename: &str, segment: MemorySegment, index: u16) -> Vec<String> {
         use MemorySegment::*;
         let i = format!("@{index}");
@@ -139,10 +145,9 @@ impl Command {
         // Translate the pop command into the assembly instructions
         let instructions = match segment {
             Local | Argument | This | That => vec![
-                &label, "D=M", &i, "D=A+D", "@R13", "M=D", "@SP", "M=M-1", "A=M", "D=M", "@R13", "A=M",
-                "M=D",
+                &label, "D=M", &i, "D=A+D", "@R13", "M=D", "@SP", "M=M-1", "A=M", "D=M", "@R13",
+                "A=M", "M=D",
             ],
-
             Static => vec!["@SP", "M=M-1", "A=M", "D=M", &stat, "M=D"],
             Pointer => {
                 let alias = if index == 0 {
@@ -167,21 +172,89 @@ impl Command {
     }
 
     fn translate_label(label: String) -> Vec<String> {
-        todo!("not implemented")
+        vec![format!("({label})")]
     }
+
     fn translate_goto(label: String) -> Vec<String> {
-        todo!("not implemented")
+        vec![format!("@{label}"), "0;JMP".into()]
     }
+
     fn translate_if(label: String) -> Vec<String> {
-        todo!("not implemented")
+        let l = format!("@{label}");
+        vec!["@SP", "AM=M-1", "D=M", &l, "D;JNE"]
+            .into_iter()
+            .map(|x| x.to_string())
+            .collect()
     }
+
     fn translate_function(name: String, local_var_count: u16) -> Vec<String> {
-        todo!("not implemented")
+        vec![
+            format!("({name})"),
+            format!("@{local_var_count}"),
+            "D=A".into(),
+            format!("({name}$arg.{local_var_count})"),
+            format!("@{name}$arg.{local_var_count}.end"),
+            "D;JEQ".into(),
+            "D=D-1".into(),
+            "@SP".into(),
+            "A=M".into(),
+            "M=0".into(),
+            "@SP".into(),
+            "M=M+1".into(),
+            format!("@{name}${local_var_count}"),
+            format!("({name}$arg.{local_var_count}.end)"),
+        ]
     }
-    fn translate_call(name: String, arg_count: u16) -> Vec<String> {
-        todo!("not implemented")
+    fn translate_call(name: String, arg_count: u16, return_address: String) -> Vec<String> {
+        let c = format!("@{name}");
+        let r = format!("@{return_address}");
+        let l = format!("({return_address})");
+        let arg = format!("@{arg_count}");
+
+        let push = ["@SP", "A=M", "M=D", "@SP", "M=M+1"];
+
+        let mut instructions = vec![&r, "D=A"];
+        instructions.extend(&push);
+
+        ["@LCL", "@ARG", "@THIS", "@THAT"]
+            .into_iter()
+            .for_each(|x| {
+                instructions.extend([x, "D=M"]);
+                instructions.extend(&push)
+            });
+
+        instructions.extend(["@SP", "D=M", "@5", "D=D-A", &arg, "D=D-A", "@ARG", "M=D"]);
+        instructions.extend(["@SP", "D=M", "@LCL", "M=D"]);
+        instructions.extend([&c, "0;JMP", &l]);
+
+        instructions.into_iter().map(|x| x.to_string()).collect()
     }
     fn translate_return() -> Vec<String> {
-        todo!("not implemented")
+        let mut instructions = vec![
+            "@LCL",
+            "D=M",
+            "@end_frame",
+            "M=D",
+            "@5",
+            "A=D-A",
+            "D=M",
+            "@ret_addr",
+            "M=D",
+            "@SP",
+            "M=M-1",
+            "A=M",
+            "D=M",
+            "@ARG",
+            "A=M",
+            "M=D",
+            "@SP",
+            "M=D+1",
+        ];
+        ["@THAT", "@THIS", "@ARG", "@LCL"]
+            .into_iter()
+            .for_each(|x| instructions.extend(["@end_frame", "AM=M-1", "D=M", x, "M=D"]));
+        instructions.extend(["@ret_addr", "A=M;JMP"]);
+
+        instructions.into_iter().map(|x| x.to_string()).collect()
     }
 }

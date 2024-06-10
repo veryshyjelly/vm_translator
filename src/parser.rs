@@ -6,12 +6,16 @@ use crate::translator::MemorySegment::*;
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
+    function_name: Option<String>,
+    call_rank: u64,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(content: &'a [char]) -> Self {
         Self {
             lexer: Lexer::new(content),
+            function_name: None,
+            call_rank: 0,
         }
     }
 
@@ -23,23 +27,23 @@ impl<'a> Parser<'a> {
 
         let command = f.iter().collect::<String>();
 
-        match command.as_str() {
-            "add" => Some(Arithmetic(ADD)),
-            "sub" => Some(Arithmetic(SUB)),
-            "neg" => Some(Arithmetic(NEG)),
-            "eq" => Some(Arithmetic(EQ)),
-            "gt" => Some(Arithmetic(GT)),
-            "lt" => Some(Arithmetic(LT)),
-            "and" => Some(Arithmetic(AND)),
-            "or" => Some(Arithmetic(OR)),
-            "not" => Some(Arithmetic(NOT)),
+        let command = match command.as_str() {
+            "add" => Arithmetic(ADD),
+            "sub" => Arithmetic(SUB),
+            "neg" => Arithmetic(NEG),
+            "eq" => Arithmetic(EQ),
+            "gt" => Arithmetic(GT),
+            "lt" => Arithmetic(LT),
+            "and" => Arithmetic(AND),
+            "or" => Arithmetic(OR),
+            "not" => Arithmetic(NOT),
             "push" | "pop" => {
                 let memory_segment = self
                     .next_token()
                     .expect("Syntax error: memory segment expected")
                     .iter()
                     .collect::<String>();
-                let memory_segment = match memory_segment.as_str() {
+                let segment = match memory_segment.as_str() {
                     "local" => Local,
                     "argument" => Argument,
                     "this" => This,
@@ -58,9 +62,9 @@ impl<'a> Parser<'a> {
                     .parse()
                     .unwrap();
                 if command == "push" {
-                    Some(Push(memory_segment, index))
+                    Push(segment, index)
                 } else {
-                    Some(Pop(memory_segment, index))
+                    Pop(segment, index)
                 }
             }
             "label" | "goto" => {
@@ -69,10 +73,14 @@ impl<'a> Parser<'a> {
                     .expect("Syntax error: memory segment expected")
                     .iter()
                     .collect::<String>();
+                let function_name = self
+                    .function_name
+                    .as_ref()
+                    .expect("label should be inside a function");
                 if command == "label" {
-                    Some(Label(label))
+                    Label(format!("{function_name}${label}"))
                 } else {
-                    Some(Goto(label))
+                    Goto(format!("{function_name}${label}"))
                 }
             }
             "if" => {
@@ -89,7 +97,11 @@ impl<'a> Parser<'a> {
                     .expect("Syntax error: memory segment expected")
                     .iter()
                     .collect::<String>();
-                Some(If(label))
+                let function_name = self
+                    .function_name
+                    .as_ref()
+                    .expect("label should be inside a function");
+                IfGoto(format!("{function_name}${label}"))
             }
             "function" | "call" => {
                 let name = self
@@ -105,14 +117,30 @@ impl<'a> Parser<'a> {
                     .parse()
                     .unwrap();
                 if command == "function" {
-                    Some(Function(name, count))
+                    let _ = self.function_name.insert(name.clone());
+                    self.call_rank = 0;
+                    Function(name, count)
                 } else {
-                    Some(Call(name, count))
+                    self.call_rank += 1;
+                    let function_name = self
+                        .function_name
+                        .as_ref()
+                        .expect("label should be inside a function");
+                    Call {
+                        callee: name,
+                        arg_count: count,
+                        return_address: format!("{function_name}$ret.{}", self.call_rank),
+                    }
                 }
             }
-            "return" => Some(Return),
+            "return" => {
+                self.function_name.as_ref().expect("unexpected return");
+                Return
+            }
             _ => panic!("invalid command {}", command),
-        }
+        };
+
+        Some(command)
     }
 
     fn next_token(&mut self) -> Option<&'a [char]> {
