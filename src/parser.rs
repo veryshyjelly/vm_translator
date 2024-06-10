@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
                     .expect("Syntax error: memory segment expected")
                     .iter()
                     .collect::<String>();
-                let arg: u16 = self
+                let count: u16 = self
                     .next_token()
                     .expect("Syntax error: segment index expected")
                     .iter()
@@ -105,9 +105,9 @@ impl<'a> Parser<'a> {
                     .parse()
                     .unwrap();
                 if command == "function" {
-                    Some(Function(name, arg))
+                    Some(Function(name, count))
                 } else {
-                    Some(Call(name, arg))
+                    Some(Call(name, count))
                 }
             }
             "return" => Some(Return),

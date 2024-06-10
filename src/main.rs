@@ -1,8 +1,8 @@
+use crate::parser::Parser;
 use std::env::args;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use crate::parser::Parser;
 
 mod lexer;
 mod parser;
