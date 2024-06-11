@@ -1,2 +1,6 @@
 /target
 *.vm
+*.hack
+*.asm
+*.tst
+*.cmp

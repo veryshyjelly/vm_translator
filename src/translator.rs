@@ -55,6 +55,16 @@ pub enum Command {
 }
 
 impl Command {
+    pub fn init() -> Vec<String> {
+        let mut instructions = ["@256", "D=A", "@SP", "M=D"]
+            .into_iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>();
+        let mut call_sys = Self::translate_call("Sys.init".into(), 0, "Sys.init$ret.0".into());
+        instructions.append(&mut call_sys);
+        instructions
+    }
+
     pub fn translate(self, filename: &str, index: &mut u64) -> Vec<String> {
         use Command::*;
         match self {
@@ -124,7 +134,7 @@ impl Command {
                 } else {
                     panic!("invalid index for pointer")
                 };
-                vec![alias, "D=M", &i, "A=A+D", "D=M"]
+                vec![alias, "D=M"]
             }
             Temp => {
                 assert!(index < 8);
@@ -157,10 +167,7 @@ impl Command {
                 } else {
                     panic!("invalid index for pointer")
                 };
-                vec![
-                    alias, "D=M", &i, "D=A+D", "@R13", "M=D", "@SP", "M=M-1", "A=M", "D=M", "@R13",
-                    "A=M", "M=D",
-                ]
+                vec!["@SP", "M=M-1", "A=M", "D=M", &alias, "M=D"]
             }
             Temp => {
                 assert!(index < 8);
@@ -181,7 +188,7 @@ impl Command {
 
     fn translate_if(label: String) -> Vec<String> {
         let l = format!("@{label}");
-        vec!["@SP", "AM=M-1", "D=M", &l, "D;JNE"]
+        ["@SP", "AM=M-1", "D=M", &l, "D;JNE"]
             .into_iter()
             .map(|x| x.to_string())
             .collect()
@@ -201,7 +208,8 @@ impl Command {
             "M=0".into(),
             "@SP".into(),
             "M=M+1".into(),
-            format!("@{name}${local_var_count}"),
+            format!("@{name}$arg.{local_var_count}"),
+            "0;JMP".into(),
             format!("({name}$arg.{local_var_count}.end)"),
         ]
     }
@@ -231,29 +239,13 @@ impl Command {
     }
     fn translate_return() -> Vec<String> {
         let mut instructions = vec![
-            "@LCL",
-            "D=M",
-            "@end_frame",
-            "M=D",
-            "@5",
-            "A=D-A",
-            "D=M",
-            "@ret_addr",
-            "M=D",
-            "@SP",
-            "M=M-1",
-            "A=M",
-            "D=M",
-            "@ARG",
-            "A=M",
-            "M=D",
-            "@SP",
-            "M=D+1",
+            "@LCL", "D=M", "@R13", "M=D", "@5", "A=D-A", "D=M", "@R14", "M=D", "@SP", "M=M-1",
+            "A=M", "D=M", "@ARG", "A=M", "M=D", "D=A", "@SP", "M=D+1",
         ];
         ["@THAT", "@THIS", "@ARG", "@LCL"]
             .into_iter()
-            .for_each(|x| instructions.extend(["@end_frame", "AM=M-1", "D=M", x, "M=D"]));
-        instructions.extend(["@ret_addr", "A=M;JMP"]);
+            .for_each(|x| instructions.extend(["@R13", "AM=M-1", "D=M", x, "M=D"]));
+        instructions.extend(["@R14", "A=M", "0;JMP"]);
 
         instructions.into_iter().map(|x| x.to_string()).collect()
     }
