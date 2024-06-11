@@ -1,28 +1,24 @@
+use crate::command::Arithmetic::*;
+use crate::command::Command;
+use crate::command::Command::*;
+use crate::command::MemorySegment::*;
 use crate::lexer::Lexer;
-use crate::translator::Arithmetic::*;
-use crate::translator::Command;
-use crate::translator::Command::*;
-use crate::translator::MemorySegment::*;
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
-    function_name: Option<String>,
-    call_rank: u64,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(content: &'a [char]) -> Self {
         Self {
             lexer: Lexer::new(content),
-            function_name: None,
-            call_rank: 0,
         }
     }
 
-    pub fn next_command(&mut self) -> Option<Command> {
+    pub fn next_command(&mut self) -> Result<Option<Command>, String> {
         let f = self.next_token().unwrap_or(&[]);
         if f.len() == 0 {
-            return None;
+            return Ok(None);
         }
 
         let command = f.iter().collect::<String>();
@@ -40,7 +36,7 @@ impl<'a> Parser<'a> {
             "push" | "pop" => {
                 let memory_segment = self
                     .next_token()
-                    .expect("Syntax error: memory segment expected")
+                    .ok_or("Syntax error: memory segment expected")?
                     .iter()
                     .collect::<String>();
                 let segment = match memory_segment.as_str() {
@@ -52,11 +48,11 @@ impl<'a> Parser<'a> {
                     "static" => Static,
                     "pointer" => Pointer,
                     "temp" => Temp,
-                    _ => panic!("invalid memory segment: {}", memory_segment),
+                    _ => Err(format!("invalid memory segment: {}", memory_segment))?,
                 };
                 let index: u16 = self
                     .next_token()
-                    .expect("Syntax error: segment index expected")
+                    .ok_or("Syntax error: segment index expected")?
                     .iter()
                     .collect::<String>()
                     .parse()
@@ -70,77 +66,55 @@ impl<'a> Parser<'a> {
             "label" | "goto" => {
                 let label = self
                     .next_token()
-                    .expect("Syntax error: memory segment expected")
+                    .ok_or("Syntax error: memory segment expected")?
                     .iter()
                     .collect::<String>();
-                let function_name = self
-                    .function_name
-                    .as_ref()
-                    .expect("label should be inside a function");
                 if command == "label" {
-                    Label(format!("{function_name}${label}"))
+                    Label(label)
                 } else {
-                    Goto(format!("{function_name}${label}"))
+                    Goto(label)
                 }
             }
             "if" => {
                 self.next_token().expect("syntax error near if");
                 assert_eq!(
                     self.next_token()
-                        .expect("if-goto expected")
+                        .ok_or("if-goto expected")?
                         .iter()
                         .collect::<String>(),
                     "goto".to_string()
                 );
                 let label = self
                     .next_token()
-                    .expect("Syntax error: memory segment expected")
+                    .ok_or("Syntax error: memory segment expected")?
                     .iter()
                     .collect::<String>();
-                let function_name = self
-                    .function_name
-                    .as_ref()
-                    .expect("label should be inside a function");
-                IfGoto(format!("{function_name}${label}"))
+                IfGoto(label)
             }
             "function" | "call" => {
                 let name = self
                     .next_token()
-                    .expect("Syntax error: memory segment expected")
+                    .ok_or("Syntax error: memory segment expected")?
                     .iter()
                     .collect::<String>();
                 let count: u16 = self
                     .next_token()
-                    .expect("Syntax error: segment index expected")
+                    .ok_or("Syntax error: segment index expected")?
                     .iter()
                     .collect::<String>()
                     .parse()
                     .unwrap();
                 if command == "function" {
-                    let _ = self.function_name.insert(name.clone());
-                    self.call_rank = 0;
                     Function(name, count)
                 } else {
-                    self.call_rank += 1;
-                    let function_name = self
-                        .function_name
-                        .as_ref()
-                        .expect("label should be inside a function");
-                    Call {
-                        callee: name,
-                        arg_count: count,
-                        return_address: format!("{function_name}$ret.{}", self.call_rank),
-                    }
+                    Call(name, count)
                 }
             }
-            "return" => {
-                self.function_name.as_ref().expect("unexpected return");
-                Return
-            }
-            _ => panic!("invalid command {}", command),
+            "return" => Return,
+            _ => Err(format!("invalid command {}", command))?,
         };
 
-        Some(command)
+        Ok(Some(command))
     }
 
     fn next_token(&mut self) -> Option<&'a [char]> {

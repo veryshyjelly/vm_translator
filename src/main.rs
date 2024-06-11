@@ -1,10 +1,11 @@
 use crate::parser::Parser;
-use crate::translator::Command;
+use crate::translator::Translator;
 use std::env::args;
 use std::fs::{read_dir, File};
 use std::io::{Read, Write};
 use std::path::Path;
 
+mod command;
 mod lexer;
 mod parser;
 mod translator;
@@ -17,6 +18,7 @@ fn main() {
 
     // Create the assembly file and begin writing the init code
     let mut file = File::create(path.with_extension("asm")).unwrap();
+    let mut translator = Translator::new(path_input.clone());
 
     if path.is_dir() {
         let files = read_dir(path).unwrap();
@@ -37,7 +39,7 @@ fn main() {
             panic!("Sys.vm not found in the directory");
         }
         // Init command is only written when a directory is passed
-        let init_command = Command::init().join("\n") + "\n";
+        let init_command = translator.init().join("\n") + "\n";
         file.write_all("// call Sys.init\n".as_bytes()).unwrap();
         file.write_all(init_command.as_bytes()).unwrap();
     } else {
@@ -52,20 +54,26 @@ fn main() {
             .unwrap()
             .read_to_string(&mut data)
             .unwrap();
-        let content = data.chars().collect::<Vec<char>>();
 
         let file_name = file_path.file_name().unwrap().to_str().unwrap();
+        let mut translator = Translator::new(file_name.to_string());
 
-        let mut parser = Parser::new(&content);
-        let mut index = 0;
+        for (i, line) in data.lines().enumerate() {
+            let content = line.chars().collect::<Vec<char>>();
+            let mut parser = Parser::new(&content);
+            let next_comm = parser
+                .next_command()
+                .map_err(|err| format!("Error occurred in file {file_name} at line {i} : {err}"))
+                .unwrap();
 
-        while let Some(comm) = parser.next_command() {
-            let stack_command = format!("// {:?}\n", comm);
-            let assembly_instruction =
-                format!("{}\n\n", comm.translate(file_name, &mut index).join("\n"));
+            if let Some(comm) = next_comm {
+                let stack_command = format!("// {:?}\n", comm);
+                let assembly_instruction =
+                    format!("{}\n\n", translator.translate_command(comm).join("\n"));
 
-            file.write_all(stack_command.as_bytes()).unwrap();
-            file.write_all(assembly_instruction.as_bytes()).unwrap();
+                file.write_all(stack_command.as_bytes()).unwrap();
+                file.write_all(assembly_instruction.as_bytes()).unwrap();
+            }
         }
     }
 }
