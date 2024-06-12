@@ -58,12 +58,13 @@ fn main() {
         let file_name = file_path.file_name().unwrap().to_str().unwrap();
         let mut translator = Translator::new(file_name.to_string());
 
-        for (i, line) in data.lines().enumerate() {
-            let content = line.chars().collect::<Vec<char>>();
-            let mut parser = Parser::new(&content);
+        let content = data.chars().collect::<Vec<char>>();
+        let mut parser = Parser::new(&content);
+
+        loop {
             let next_comm = parser
                 .next_command()
-                .map_err(|err| format!("Error occurred in file {file_name} at line {i} : {err}"))
+                .map_err(|err| format!("Error occurred in file {file_name}: {err}"))
                 .unwrap();
 
             if let Some(comm) = next_comm {
@@ -73,6 +74,8 @@ fn main() {
 
                 file.write_all(stack_command.as_bytes()).unwrap();
                 file.write_all(assembly_instruction.as_bytes()).unwrap();
+            } else {
+                break;
             }
         }
     }

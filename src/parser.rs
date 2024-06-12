@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
                 }
             }
             "if" => {
-                self.next_token().expect("syntax error near if");
+                self.next_token().ok_or("syntax error near if")?;
                 assert_eq!(
                     self.next_token()
                         .ok_or("if-goto expected")?
